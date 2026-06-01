@@ -17,10 +17,20 @@ export type ChatMessageRecord = {
 };
 
 export type QuizQuestion = {
+  id: string;
   question: string;
-  options: [string, string, string, string];
+  options: string[];
   answerIndex: number;
   explanation: string;
+  sortOrder: number;
+};
+
+export type QuizSetRecord = {
+  id: string;
+  title: string;
+  questionCount: number;
+  createdAt: Date;
+  questions: QuizQuestion[];
 };
 
 export type DocChunkRecord = {

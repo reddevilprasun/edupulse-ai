@@ -22,6 +22,7 @@ model User {
   updatedAt     DateTime      @updatedAt
   documents     Document[]
   messages      ChatMessage[]
+  quizSets      QuizSet[]
   sessions      Session[]
   accounts      Account[]
 }
@@ -35,6 +36,7 @@ model Document {
   rawText   String        @db.Text
   chunks    DocChunk[]
   messages  ChatMessage[]
+  quizSets  QuizSet[]
   createdAt DateTime      @default(now())
 }
 
@@ -60,6 +62,34 @@ model ChatMessage {
   createdAt  DateTime @default(now())
 
   @@index([documentId])
+}
+
+model QuizSet {
+  id            String         @id @default(cuid())
+  documentId    String
+  document      Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  questionCount Int
+  questions     QuizQuestion[]
+  createdAt     DateTime       @default(now())
+
+  @@index([documentId])
+  @@index([userId])
+}
+
+model QuizQuestion {
+  id          String   @id @default(cuid())
+  quizSetId   String
+  quizSet     QuizSet  @relation(fields: [quizSetId], references: [id], onDelete: Cascade)
+  question    String   @db.Text
+  options     String[]
+  answerIndex Int
+  explanation String   @db.Text
+  sortOrder   Int
+
+  @@index([quizSetId])
 }
 
 model Session {

@@ -13,13 +13,11 @@ import {
 } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useSession } from "@/lib/auth-client";
-import type { DocumentRecord, QuizQuestion } from "@/types/index";
+import type { DocumentRecord } from "@/types/index";
 
 export default function DashboardPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
-  const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
-  const [isQuizLoading, setIsQuizLoading] = useState(false);
   const { data: session } = useSession();
 
   useEffect(() => {
@@ -42,33 +40,6 @@ export default function DashboardPage() {
 
   const activeDocument =
     documents.find((document) => document.id === activeDocumentId) ?? null;
-
-  const handleGenerateQuiz = async () => {
-    if (!activeDocumentId) {
-      return;
-    }
-
-    setIsQuizLoading(true);
-    setQuizQuestions([]);
-
-    try {
-      const response = await fetch("/api/quiz", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ documentId: activeDocumentId }),
-      });
-
-      const data = await response.json();
-      setQuizQuestions(data.questions ?? []);
-    } catch {
-      setIsQuizLoading(false);
-      return;
-    }
-
-    setIsQuizLoading(false);
-  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -123,9 +94,8 @@ export default function DashboardPage() {
               </TabsContent>
               <TabsContent value="quiz" className="flex-1 min-h-0 overflow-hidden mt-0 flex flex-col">
                 <QuizDisplay
-                  questions={quizQuestions}
-                  isLoading={isQuizLoading}
-                  onGenerate={handleGenerateQuiz}
+                  key={activeDocument.id}
+                  documentId={activeDocument.id}
                 />
               </TabsContent>
             </Tabs>

@@ -18,11 +18,9 @@ import {
 // document switch never needs to re-hit the network.
 function ChatInner({
   documentId,
-  documentTitle,
   initialMessages,
 }: {
   documentId: string;
-  documentTitle: string;
   initialMessages: UIMessage[];
 }) {
   const [input, setInput] = useState("");
@@ -85,7 +83,6 @@ function ChatInner({
     return () => {
       setCachedHistory(documentId, latestMessagesRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentId]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -215,7 +212,9 @@ export default function ChatInterface({
   useEffect(() => {
     // Cache hit → render immediately, skip the network fetch entirely.
     if (getCachedHistory(documentId) !== undefined) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInitialMessages(getCachedHistory(documentId)!);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setHistoryError(false);
       return;
     }
@@ -267,7 +266,6 @@ export default function ChatInterface({
       ) : (
         <ChatInner
           documentId={documentId}
-          documentTitle={documentTitle}
           initialMessages={initialMessages}
         />
       )}
