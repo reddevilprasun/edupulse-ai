@@ -43,7 +43,7 @@ export default function SignUp() {
       title: "Success",
       description: "Account created successfully. Redirecting...",
     });
-    router.push("/");
+    router.push("/dashboard");
   };
 
   return (

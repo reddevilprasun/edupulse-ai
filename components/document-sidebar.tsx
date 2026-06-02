@@ -1,11 +1,14 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 import { UploadCloud, Loader2, Trash2, AlertTriangle } from "lucide-react";
 import type { DocumentRecord } from "@/types/index";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/components/ui/use-toast";
+
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB — no longer limited by serverless body size
 
 export default function DocumentSidebar({
   documents,
@@ -22,6 +25,7 @@ export default function DocumentSidebar({
 }) {
   const hasDocuments = documents.length > 0;
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string>("");
   const [deletingId, setDeletingId] = useState<string | null>(null); // which doc is being deleted (API call)
   const [confirmDoc, setConfirmDoc] = useState<DocumentRecord | null>(null); // dialog open for which doc
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -34,40 +38,77 @@ export default function DocumentSidebar({
       return;
     }
 
+    // Client-side validation
+    if (file.type && file.type !== "application/pdf") {
+      toast({
+        title: "Only PDF files are supported.",
+        variant: "destructive",
+      });
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      toast({
+        title: "File exceeds the 10MB upload limit.",
+        variant: "destructive",
+      });
+      event.target.value = "";
+      return;
+    }
+
     setIsUploading(true);
+    setUploadProgress("Uploading...");
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
+      // Step 1: Upload the file directly to Vercel Blob via client-side upload.
+      // The browser sends the file straight to Blob storage — it never passes
+      // through the serverless function body, so there's no body size limit.
+      const blob = await upload(file.name, file, {
+        access: "public",
+        handleUploadUrl: "/api/upload",
+        multipart: true,
+        onUploadProgress: (progress) => {
+          setUploadProgress(`Uploading... ${progress.percentage}%`);
+        },
       });
 
-      if (!response.ok) {
-        let errorMessage = "Upload failed.";
+      // Step 2: Now that the file is in Blob storage, ask the server to
+      // fetch it from there, parse the PDF text, and save to the database.
+      setUploadProgress("Processing PDF...");
+
+      const processResponse = await fetch("/api/upload/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blobUrl: blob.url,
+          filename: file.name,
+        }),
+      });
+
+      if (!processResponse.ok) {
+        let errorMessage = "Failed to process PDF.";
 
         try {
-          const data = (await response.json()) as { error?: string };
+          const data = (await processResponse.json()) as { error?: string };
           if (data?.error) {
             errorMessage = data.error;
           }
         } catch {
-          errorMessage = "Upload failed. Please try again.";
+          errorMessage = "Failed to process PDF. Please try again.";
         }
 
         throw new Error(errorMessage);
       }
 
-      const newDoc = await response.json();
+      const newDoc = await processResponse.json();
       toast({ title: "Document processed!" });
       onUploadSuccess?.(newDoc);
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
-          : "Upload failed. File might be too large.";
+          : "Upload failed. Please try again.";
 
       toast({
         title: message,
@@ -75,6 +116,7 @@ export default function DocumentSidebar({
       });
     } finally {
       setIsUploading(false);
+      setUploadProgress("");
       event.target.value = "";
     }
   };
@@ -180,7 +222,7 @@ export default function DocumentSidebar({
             ) : (
               <UploadCloud className="h-4 w-4" />
             )}
-            {isUploading ? "Uploading..." : "Upload Document"}
+            {isUploading ? uploadProgress || "Uploading..." : "Upload Document"}
           </Button>
         </div>
 

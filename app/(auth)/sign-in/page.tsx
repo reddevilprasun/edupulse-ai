@@ -41,7 +41,7 @@ export default function SignIn() {
       title: "Success",
       description: "Signed in successfully. Redirecting...",
     });
-    router.push("/");
+    router.push("/dashboard");
   };
 
   return (
