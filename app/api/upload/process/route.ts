@@ -1,14 +1,5 @@
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import {
-  PDFParse,
-  AbortException,
-  FormatError,
-  InvalidPDFException,
-  PasswordException,
-  ResponseException,
-  UnknownErrorException,
-} from "pdf-parse";
 import prisma from "@/lib/prisma";
 import { del } from "@vercel/blob";
 
@@ -20,6 +11,58 @@ export const maxDuration = 60;
 interface ProcessRequest {
   blobUrl: string;
   filename: string;
+}
+
+/**
+ * Minimal no-op CanvasFactory to prevent pdfjs-dist from trying to load
+ * @napi-rs/canvas (a native module that doesn't exist in Vercel serverless).
+ * We only need text extraction — never rendering — so canvas is unnecessary.
+ */
+class NoOpCanvasFactory {
+  create(width: number, height: number) {
+    return { canvas: { width, height }, context: null };
+  }
+  reset() {}
+  destroy() {}
+}
+
+/**
+ * Extract text from a PDF buffer using pdfjs-dist directly.
+ * Bypasses pdf-parse (which depends on @napi-rs/canvas) to work in Vercel serverless.
+ */
+async function extractTextFromPdf(buffer: Uint8Array): Promise<string> {
+  // Use the legacy build which is self-contained (no separate worker file needed)
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+  const loadingTask = pdfjsLib.getDocument({
+    data: buffer,
+    // Provide a no-op canvas factory so pdfjs never tries to load @napi-rs/canvas
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    CanvasFactory: NoOpCanvasFactory as any,
+    // Disable features we don't need for text extraction
+    isOffscreenCanvasSupported: false,
+    disableFontFace: true,
+    useSystemFonts: false,
+    // Run inline without a worker
+    useWorkerFetch: false,
+  });
+
+  const pdf = await loadingTask.promise;
+  const textParts: string[] = [];
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items
+      .filter((item: Record<string, unknown>) => "str" in item)
+      .map((item: Record<string, unknown>) => item.str as string)
+      .join(" ");
+    textParts.push(pageText);
+    page.cleanup();
+  }
+
+  pdf.destroy();
+  return textParts.join("\n");
 }
 
 /**
@@ -64,7 +107,7 @@ export async function POST(request: Request) {
     }
 
     // ── Fetch the PDF from Blob storage ─────────────────────────────────────
-    let pdfBuffer: Buffer;
+    let pdfBuffer: Uint8Array;
 
     try {
       const pdfResponse = await fetch(blobUrl);
@@ -76,7 +119,7 @@ export async function POST(request: Request) {
       }
 
       const arrayBuffer = await pdfResponse.arrayBuffer();
-      pdfBuffer = Buffer.from(arrayBuffer);
+      pdfBuffer = new Uint8Array(arrayBuffer);
     } catch (fetchError) {
       const err = fetchError as Error;
       console.error("PDF fetch error:", err);
@@ -91,7 +134,6 @@ export async function POST(request: Request) {
 
     // ── Validate the PDF ────────────────────────────────────────────────────
     if (pdfBuffer.length === 0) {
-      // Clean up the empty blob
       await safeDeleteBlob(blobUrl);
       return Response.json(
         { error: "Uploaded file is empty." },
@@ -99,7 +141,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const header = pdfBuffer.subarray(0, 4).toString("utf8");
+    const header = new TextDecoder().decode(pdfBuffer.subarray(0, 4));
     if (header !== "%PDF") {
       await safeDeleteBlob(blobUrl);
       return Response.json(
@@ -109,37 +151,27 @@ export async function POST(request: Request) {
     }
 
     // ── Parse the PDF text ──────────────────────────────────────────────────
-    const parser = new PDFParse({ data: pdfBuffer });
     let rawText = "";
 
     try {
-      const parsed = await parser.getText();
-      rawText = parsed.text ?? "";
+      rawText = await extractTextFromPdf(pdfBuffer);
     } catch (parseError) {
-      let message = "Failed to parse PDF content.";
+      const err = parseError as Error;
+      console.error("PDF parse error:", err);
 
-      if (parseError instanceof PasswordException) {
+      let message = "Failed to parse PDF content.";
+      const errMsg = err.message?.toLowerCase() ?? "";
+
+      if (errMsg.includes("password")) {
         message = "PDF is password protected.";
-      } else if (parseError instanceof InvalidPDFException) {
-        message = "Invalid PDF content.";
-      } else if (parseError instanceof FormatError) {
+      } else if (errMsg.includes("invalid") || errMsg.includes("corrupt")) {
+        message = "Invalid or corrupt PDF content.";
+      } else if (errMsg.includes("format")) {
         message = "PDF format error.";
-      } else if (parseError instanceof ResponseException) {
-        message = "Failed to read PDF data.";
-      } else if (parseError instanceof AbortException) {
-        message = "PDF parsing was aborted.";
-      } else if (parseError instanceof UnknownErrorException) {
-        message = "Unknown PDF parsing error.";
-      } else if (parseError instanceof Error && parseError.message) {
-        message = parseError.message;
       }
 
-      // Clean up the blob since parsing failed
       await safeDeleteBlob(blobUrl);
-
-      return Response.json({ error: message }, { status: 422 });
-    } finally {
-      await parser.destroy();
+      return Response.json({ error: message, details: err.message }, { status: 422 });
     }
 
     if (!rawText.trim()) {
@@ -164,12 +196,14 @@ export async function POST(request: Request) {
         },
       });
 
-      return Response.json({ id: document.id, title: document.title });
+      return Response.json({ 
+        id: document.id, 
+        title: document.title,
+        createdAt: document.createdAt 
+      });
     } catch (dbError) {
       const err = dbError as Error;
       console.error("Database save error:", err);
-      // Don't delete the blob — the file uploaded fine, only DB save failed.
-      // The user can retry processing.
       return Response.json(
         {
           error: "Failed to save document to database.",

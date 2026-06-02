@@ -37,6 +37,7 @@ export async function POST(request: Request) {
         return {
           allowedContentTypes: ["application/pdf"],
           maximumSizeInBytes: 10 * 1024 * 1024, // Allow up to 10MB via direct upload (no serverless body limit)
+          addRandomSuffix: true, // Generate unique filenames to prevent collisions
           tokenPayload: JSON.stringify({
             userId: session.user.id,
             clientPayload,
