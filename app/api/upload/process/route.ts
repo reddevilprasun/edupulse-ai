@@ -13,56 +13,17 @@ interface ProcessRequest {
   filename: string;
 }
 
-/**
- * Minimal no-op CanvasFactory to prevent pdfjs-dist from trying to load
- * @napi-rs/canvas (a native module that doesn't exist in Vercel serverless).
- * We only need text extraction — never rendering — so canvas is unnecessary.
- */
-class NoOpCanvasFactory {
-  create(width: number, height: number) {
-    return { canvas: { width, height }, context: null };
-  }
-  reset() {}
-  destroy() {}
-}
+import { extractText, getDocumentProxy } from 'unpdf';
 
 /**
- * Extract text from a PDF buffer using pdfjs-dist directly.
- * Bypasses pdf-parse (which depends on @napi-rs/canvas) to work in Vercel serverless.
+ * Extract text from a PDF buffer using unpdf.
+ * unpdf is explicitly built for serverless environments (Node, Vercel Edge, etc.)
+ * and handles PDF.js browser dependencies (like DOMMatrix) safely without crashing.
  */
 async function extractTextFromPdf(buffer: Uint8Array): Promise<string> {
-  // Use the legacy build which is self-contained (no separate worker file needed)
-  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-
-  const loadingTask = pdfjsLib.getDocument({
-    data: buffer,
-    // Provide a no-op canvas factory so pdfjs never tries to load @napi-rs/canvas
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    CanvasFactory: NoOpCanvasFactory as any,
-    // Disable features we don't need for text extraction
-    isOffscreenCanvasSupported: false,
-    disableFontFace: true,
-    useSystemFonts: false,
-    // Run inline without a worker
-    useWorkerFetch: false,
-  });
-
-  const pdf = await loadingTask.promise;
-  const textParts: string[] = [];
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .filter((item: Record<string, unknown>) => "str" in item)
-      .map((item: Record<string, unknown>) => item.str as string)
-      .join(" ");
-    textParts.push(pageText);
-    page.cleanup();
-  }
-
-  pdf.destroy();
-  return textParts.join("\n");
+  const pdf = await getDocumentProxy(buffer);
+  const { text } = await extractText(pdf, { mergePages: true });
+  return text;
 }
 
 /**
