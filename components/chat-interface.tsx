@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, type FormEvent } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -124,19 +126,47 @@ function ChatInner({
                   className={
                     message.role === "user"
                       ? "bg-primary text-primary-foreground px-4 py-2 rounded-2xl rounded-tr-sm max-w-[80%] text-sm"
-                      : "bg-muted text-muted-foreground px-4 py-2 rounded-2xl rounded-tl-sm max-w-[80%] text-sm"
+                      : "bg-muted text-muted-foreground px-4 py-3 rounded-2xl rounded-tl-sm max-w-[85%] text-sm"
                   }
                 >
-                  <p className="whitespace-pre-wrap">
-                    {message.parts.map(
-                      (part: UIMessage["parts"][number], partIndex: number) =>
-                        part.type === "text" ? (
-                          <span key={`${message.id}-${partIndex}`}>
-                            {part.text}
-                          </span>
-                        ) : null
-                    )}
-                  </p>
+                  {message.role === "user" ? (
+                    // User messages: plain text
+                    <p className="whitespace-pre-wrap">
+                      {message.parts.map(
+                        (part: UIMessage["parts"][number], partIndex: number) =>
+                          part.type === "text" ? (
+                            <span key={`${message.id}-${partIndex}`}>
+                              {part.text}
+                            </span>
+                          ) : null
+                      )}
+                    </p>
+                  ) : (
+                    // Assistant messages: full markdown rendering
+                    <div className="prose prose-sm dark:prose-invert max-w-none
+                      prose-p:my-1 prose-p:leading-relaxed
+                      prose-headings:font-semibold prose-headings:my-2
+                      prose-ul:my-1 prose-ul:pl-4 prose-li:my-0.5
+                      prose-ol:my-1 prose-ol:pl-4
+                      prose-code:bg-black/20 prose-code:dark:bg-white/10
+                      prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                      prose-code:text-xs prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
+                      prose-pre:bg-black/30 prose-pre:dark:bg-white/5
+                      prose-pre:rounded-lg prose-pre:p-3 prose-pre:my-2
+                      prose-pre:overflow-x-auto prose-pre:text-xs
+                      prose-blockquote:border-l-2 prose-blockquote:border-primary/50
+                      prose-blockquote:pl-3 prose-blockquote:italic prose-blockquote:text-muted-foreground
+                      prose-table:text-xs prose-th:font-semibold
+                      prose-strong:font-semibold prose-strong:text-foreground
+                      [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {message.parts
+                          .filter((p: UIMessage["parts"][number]) => p.type === "text")
+                          .map((p: UIMessage["parts"][number]) => (p as { type: "text"; text: string }).text)
+                          .join("")}
+                      </ReactMarkdown>
+                    </div>
+                  )}
                 </div>
               </div>
             ))
