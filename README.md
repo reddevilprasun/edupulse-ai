@@ -2,6 +2,9 @@
 
 > **Transform static study materials into interactive learning hubs.** Upload PDFs, interrogate documents in real-time, generate custom interactive practice quizzes, and master complex academic topics with an AI study workspace engineered for speed, utility, and premium user experience.
 
+<img width="1710" height="1032" alt="Screenshot 2026-06-02 at 11 02 12 AM" src="https://github.com/user-attachments/assets/dd367000-8784-4b5a-8f2c-db6400871b55" />
+
+
 ---
 
 ## 🌟 Introduction & Project Vision
