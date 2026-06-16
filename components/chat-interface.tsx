@@ -1,18 +1,42 @@
 "use client";
 
-import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import {
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  Send,
+  Bot,
+  User,
+  Copy,
+  Check,
+  Sparkles,
+} from "lucide-react";
 import {
   getCachedHistory,
   setCachedHistory,
 } from "@/lib/chat-history-cache";
+
+const SUGGESTED_PROMPTS = [
+  "Summarize this document",
+  "What are the key points?",
+  "Explain the main concepts simply",
+  "Quiz me on this material",
+];
+
+// Pull the plain-text content out of a UIMessage's parts.
+function messageText(message: UIMessage): string {
+  return message.parts
+    .filter((p: UIMessage["parts"][number]) => p.type === "text")
+    .map((p: UIMessage["parts"][number]) => (p as { type: "text"; text: string }).text)
+    .join("");
+}
 
 // ─── Inner chat component ───────────────────────────────────────────────────
 // Only mounts AFTER history is loaded → useChat is initialized with correct messages.
@@ -27,6 +51,8 @@ function ChatInner({
 }) {
   const [input, setInput] = useState("");
   const [chatError, setChatError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { messages, sendMessage, status } = useChat({
     id: documentId,
@@ -104,79 +130,172 @@ function ChatInner({
     setInput("");
   };
 
+  // Auto-grow the textarea up to a max height, then let it scroll.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [input]);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter sends; Shift+Enter inserts a newline.
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (!input.trim() || isLoading) return;
+      setChatError(null);
+      sendMessage({ text: input });
+      setInput("");
+    }
+  };
+
+  const sendPrompt = (text: string) => {
+    if (isLoading) return;
+    setChatError(null);
+    sendMessage({ text });
+  };
+
+  const handleCopy = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+    } catch {
+      // Clipboard may be unavailable (e.g. insecure context) — fail silently.
+    }
+  };
+
   return (
     <>
-      <ScrollArea className="flex-1 min-h-0 px-6">
-        <div className="py-4 space-y-4">
+      <ScrollArea className="flex-1 min-h-0 px-4 md:px-6">
+        <div className="py-4 space-y-5">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm gap-2">
-              Start by asking a question about your document
+            <div className="flex flex-col items-center justify-center min-h-[50vh] text-center gap-4 px-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Sparkles className="h-6 w-6" />
+              </div>
+              <div className="space-y-1">
+                <p className="font-semibold">Ask anything about your document</p>
+                <p className="text-sm text-muted-foreground">
+                  Pick a suggestion below or type your own question.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2 max-w-md">
+                {SUGGESTED_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => sendPrompt(prompt)}
+                    disabled={isLoading}
+                    className="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-foreground disabled:opacity-50"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
-            messages.map((message: UIMessage) => (
-              <div
-                key={message.id}
-                className={
-                  message.role === "user"
-                    ? "flex justify-end"
-                    : "flex justify-start"
-                }
-              >
+            messages.map((message: UIMessage) => {
+              const isUser = message.role === "user";
+              return (
                 <div
+                  key={message.id}
                   className={
-                    message.role === "user"
-                      ? "bg-primary text-primary-foreground px-4 py-2 rounded-2xl rounded-tr-sm max-w-[80%] text-sm"
-                      : "bg-muted text-muted-foreground px-4 py-3 rounded-2xl rounded-tl-sm max-w-[85%] text-sm"
+                    "flex gap-2.5 " + (isUser ? "justify-end" : "justify-start")
                   }
                 >
-                  {message.role === "user" ? (
-                    // User messages: plain text
-                    <p className="whitespace-pre-wrap">
-                      {message.parts.map(
-                        (part: UIMessage["parts"][number], partIndex: number) =>
-                          part.type === "text" ? (
-                            <span key={`${message.id}-${partIndex}`}>
-                              {part.text}
-                            </span>
-                          ) : null
+                  {/* Assistant avatar */}
+                  {!isUser && (
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <Bot className="h-4 w-4" />
+                    </div>
+                  )}
+
+                  <div
+                    className={
+                      "group min-w-0 " + (isUser ? "max-w-[85%]" : "max-w-[85%]")
+                    }
+                  >
+                    <div
+                      className={
+                        isUser
+                          ? "bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm shadow-sm"
+                          : "bg-muted text-foreground px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm"
+                      }
+                    >
+                      {isUser ? (
+                        // User messages: plain text
+                        <p className="whitespace-pre-wrap break-words">
+                          {messageText(message)}
+                        </p>
+                      ) : (
+                        // Assistant messages: full markdown rendering
+                        <div className="prose prose-sm dark:prose-invert max-w-none
+                          prose-p:my-1 prose-p:leading-relaxed
+                          prose-headings:font-semibold prose-headings:my-2
+                          prose-ul:my-1 prose-ul:pl-4 prose-li:my-0.5
+                          prose-ol:my-1 prose-ol:pl-4
+                          prose-code:bg-black/20 prose-code:dark:bg-white/10
+                          prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                          prose-code:text-xs prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
+                          prose-pre:bg-black/30 prose-pre:dark:bg-white/5
+                          prose-pre:rounded-lg prose-pre:p-3 prose-pre:my-2
+                          prose-pre:overflow-x-auto prose-pre:text-xs
+                          prose-blockquote:border-l-2 prose-blockquote:border-primary/50
+                          prose-blockquote:pl-3 prose-blockquote:italic prose-blockquote:text-muted-foreground
+                          prose-table:text-xs prose-th:font-semibold
+                          prose-strong:font-semibold prose-strong:text-foreground
+                          [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {messageText(message)}
+                          </ReactMarkdown>
+                        </div>
                       )}
-                    </p>
-                  ) : (
-                    // Assistant messages: full markdown rendering
-                    <div className="prose prose-sm dark:prose-invert max-w-none
-                      prose-p:my-1 prose-p:leading-relaxed
-                      prose-headings:font-semibold prose-headings:my-2
-                      prose-ul:my-1 prose-ul:pl-4 prose-li:my-0.5
-                      prose-ol:my-1 prose-ol:pl-4
-                      prose-code:bg-black/20 prose-code:dark:bg-white/10
-                      prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-                      prose-code:text-xs prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
-                      prose-pre:bg-black/30 prose-pre:dark:bg-white/5
-                      prose-pre:rounded-lg prose-pre:p-3 prose-pre:my-2
-                      prose-pre:overflow-x-auto prose-pre:text-xs
-                      prose-blockquote:border-l-2 prose-blockquote:border-primary/50
-                      prose-blockquote:pl-3 prose-blockquote:italic prose-blockquote:text-muted-foreground
-                      prose-table:text-xs prose-th:font-semibold
-                      prose-strong:font-semibold prose-strong:text-foreground
-                      [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {message.parts
-                          .filter((p: UIMessage["parts"][number]) => p.type === "text")
-                          .map((p: UIMessage["parts"][number]) => (p as { type: "text"; text: string }).text)
-                          .join("")}
-                      </ReactMarkdown>
+                    </div>
+
+                    {/* Copy button on assistant messages */}
+                    {!isUser && (
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(message.id, messageText(message))}
+                        aria-label="Copy message"
+                        className="mt-1 ml-1 inline-flex items-center gap-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+                      >
+                        {copiedId === message.id ? (
+                          <>
+                            <Check className="h-3 w-3" />
+                            Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" />
+                            Copy
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* User avatar */}
+                  {isUser && (
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
+                      <User className="h-4 w-4" />
                     </div>
                   )}
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
 
           {isLoading && (
-            <div className="flex justify-start">
-              <div className="bg-muted px-4 py-2 rounded-2xl rounded-tl-sm text-sm text-muted-foreground flex items-center gap-2">
-                <Loader2 className="animate-spin h-4 w-4" />
-                Thinking...
+            <div className="flex gap-2.5 justify-start">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <Bot className="h-4 w-4" />
+              </div>
+              <div className="bg-muted px-4 py-3.5 rounded-2xl rounded-tl-sm flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:-0.3s]" />
+                <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:-0.15s]" />
+                <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce" />
               </div>
             </div>
           )}
@@ -203,21 +322,36 @@ function ChatInner({
         </div>
       </ScrollArea>
 
-      <div className="px-6 py-4 border-t border-border shrink-0">
-        <form onSubmit={handleSubmit} className="flex gap-2">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.currentTarget.value)}
-            placeholder={
-              chatError
-                ? "Fix the issue above, then try again..."
-                : "Ask about this document..."
-            }
-            disabled={isLoading}
-            className="flex-1"
-          />
-          <Button type="submit" disabled={isLoading || !input.trim()}>
-            Send
+      <div className="px-4 md:px-6 py-4 border-t border-border shrink-0">
+        <form onSubmit={handleSubmit} className="flex items-end gap-2">
+          <div className="flex-1 flex items-end rounded-2xl border border-border bg-background px-3 py-2 transition-colors focus-within:border-primary/50 focus-within:ring-3 focus-within:ring-ring/20">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.currentTarget.value)}
+              onKeyDown={handleKeyDown}
+              rows={1}
+              placeholder={
+                chatError
+                  ? "Fix the issue above, then try again..."
+                  : "Ask about this document...  (Shift + Enter for a new line)"
+              }
+              disabled={isLoading}
+              className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50 max-h-40"
+            />
+          </div>
+          <Button
+            type="submit"
+            size="icon"
+            aria-label="Send message"
+            disabled={isLoading || !input.trim()}
+            className="h-10 w-10 rounded-full"
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
           </Button>
         </form>
       </div>
@@ -271,7 +405,7 @@ export default function ChatInterface({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="px-6 py-4 border-b border-border shrink-0">
+      <div className="px-4 md:px-6 py-4 border-b border-border shrink-0">
         <h2 className="font-semibold truncate">{documentTitle}</h2>
         <p className="text-sm text-muted-foreground">
           Ask anything about this document
@@ -279,7 +413,7 @@ export default function ChatInterface({
       </div>
 
       {historyError && (
-        <div className="px-6 py-2 bg-destructive/10 border-b border-destructive/20 flex items-center gap-2 text-xs text-destructive shrink-0">
+        <div className="px-4 md:px-6 py-2 bg-destructive/10 border-b border-destructive/20 flex items-center gap-2 text-xs text-destructive shrink-0">
           <AlertCircle className="h-3 w-3" />
           Could not load chat history. You can still send new messages.
         </div>
