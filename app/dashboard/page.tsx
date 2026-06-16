@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { LogOut } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
 import { useSession, signOut } from "@/lib/auth-client";
 import type { DocumentRecord } from "@/types/index";
 import { invalidateCachedHistory } from "@/lib/chat-history-cache";
@@ -27,6 +27,7 @@ export default function DashboardPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(SIDEBAR_DEFAULT);
@@ -105,20 +106,26 @@ export default function DashboardPage() {
     }
   };
 
+  // Selecting a document also closes the mobile drawer so the chat is visible.
+  const handleSelectDocument = (id: string) => {
+    setActiveDocumentId(id);
+    setMobileSidebarOpen(false);
+  };
+
   const activeDocument =
     documents.find((document) => document.id === activeDocumentId) ?? null;
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      {/* ── Sidebar ── */}
+      {/* ── Desktop sidebar (resizable, ≥ md) ── */}
       <aside
         style={{ width: sidebarWidth, minWidth: sidebarWidth, maxWidth: sidebarWidth }}
-        className="flex flex-col border-r border-border overflow-hidden shrink-0"
+        className="hidden md:flex flex-col border-r border-border overflow-hidden shrink-0"
       >
         <DocumentSidebar
           documents={documents}
           activeDocumentId={activeDocumentId}
-          onSelectDocument={setActiveDocumentId}
+          onSelectDocument={handleSelectDocument}
           onUploadSuccess={(doc) => {
             setDocuments((prev) => [doc, ...prev]);
             setActiveDocumentId(doc.id);
@@ -127,10 +134,10 @@ export default function DashboardPage() {
         />
       </aside>
 
-      {/* ── Resizable divider ── */}
+      {/* ── Resizable divider (≥ md) ── */}
       <div
         onMouseDown={onMouseDown}
-        className="w-1 shrink-0 cursor-col-resize relative group select-none"
+        className="hidden md:block w-1 shrink-0 cursor-col-resize relative group select-none"
         title="Drag to resize"
       >
         {/* Visible grab line */}
@@ -139,12 +146,57 @@ export default function DashboardPage() {
         <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
       </div>
 
+      {/* ── Mobile sidebar drawer (< md) ── */}
+      <div className="md:hidden">
+        {/* Backdrop */}
+        <div
+          onClick={() => setMobileSidebarOpen(false)}
+          className={
+            "fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 " +
+            (mobileSidebarOpen
+              ? "opacity-100"
+              : "opacity-0 pointer-events-none")
+          }
+        />
+        {/* Sliding panel */}
+        <aside
+          className={
+            "fixed inset-y-0 left-0 z-50 w-[85vw] max-w-[320px] border-r border-border bg-sidebar shadow-2xl transition-transform duration-300 ease-out " +
+            (mobileSidebarOpen ? "translate-x-0" : "-translate-x-full")
+          }
+        >
+          <DocumentSidebar
+            documents={documents}
+            activeDocumentId={activeDocumentId}
+            onSelectDocument={handleSelectDocument}
+            onUploadSuccess={(doc) => {
+              setDocuments((prev) => [doc, ...prev]);
+              setActiveDocumentId(doc.id);
+              setMobileSidebarOpen(false);
+            }}
+            onDeleteDocument={handleDeleteDocument}
+            onClose={() => setMobileSidebarOpen(false)}
+          />
+        </aside>
+      </div>
+
       {/* ── Main workspace ── */}
       <main className="flex-1 overflow-hidden flex flex-col min-w-0">
-        <header className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-          <div>
-            <p className="text-sm text-muted-foreground">Dashboard</p>
-            <h1 className="text-lg font-semibold">Study Workspace</h1>
+        <header className="flex items-center justify-between gap-2 px-4 md:px-6 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setMobileSidebarOpen(true)}
+              aria-label="Open documents"
+              className="md:hidden shrink-0"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <div className="min-w-0">
+              <p className="text-sm text-muted-foreground">Dashboard</p>
+              <h1 className="text-lg font-semibold truncate">Study Workspace</h1>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             {session && (
@@ -179,7 +231,7 @@ export default function DashboardPage() {
             </div>
           ) : (
             <Tabs defaultValue="chat" className="flex flex-col h-full min-h-0">
-              <TabsList className="mx-6 mt-4 w-fit shrink-0">
+              <TabsList className="mx-4 md:mx-6 mt-4 w-fit shrink-0">
                 <TabsTrigger value="chat">Chat</TabsTrigger>
                 <TabsTrigger value="quiz">Quiz</TabsTrigger>
               </TabsList>

@@ -2,13 +2,23 @@
 
 import { useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { UploadCloud, Loader2, Trash2, AlertTriangle } from "lucide-react";
+import {
+  UploadCloud,
+  Loader2,
+  Trash2,
+  AlertTriangle,
+  FileText,
+  Search,
+  X,
+} from "lucide-react";
 import type { DocumentRecord } from "@/types/index";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/components/ui/use-toast";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB — no longer limited by serverless body size
+const SEARCH_THRESHOLD = 5; // show the filter box once the list grows past this
 
 export default function DocumentSidebar({
   documents,
@@ -16,35 +26,34 @@ export default function DocumentSidebar({
   onUploadSuccess,
   onSelectDocument,
   onDeleteDocument,
+  onClose,
 }: {
   documents: DocumentRecord[];
   activeDocumentId: string | null;
   onUploadSuccess?: (doc: DocumentRecord) => void;
   onSelectDocument?: (id: string) => void;
   onDeleteDocument?: (id: string) => void;
+  /** When provided, renders a close button in the header (used by the mobile drawer). */
+  onClose?: () => void;
 }) {
   const hasDocuments = documents.length > 0;
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>("");
   const [deletingId, setDeletingId] = useState<string | null>(null); // which doc is being deleted (API call)
   const [confirmDoc, setConfirmDoc] = useState<DocumentRecord | null>(null); // dialog open for which doc
+  const [isDragging, setIsDragging] = useState(false);
+  const [query, setQuery] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
 
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
+  // ── Core upload pipeline shared by the file picker and drag-and-drop ──────────
+  const processFile = async (file: File) => {
     // Client-side validation
     if (file.type && file.type !== "application/pdf") {
       toast({
         title: "Only PDF files are supported.",
         variant: "destructive",
       });
-      event.target.value = "";
       return;
     }
 
@@ -53,7 +62,6 @@ export default function DocumentSidebar({
         title: "File exceeds the 10MB upload limit.",
         variant: "destructive",
       });
-      event.target.value = "";
       return;
     }
 
@@ -117,8 +125,34 @@ export default function DocumentSidebar({
     } finally {
       setIsUploading(false);
       setUploadProgress("");
-      event.target.value = "";
     }
+  };
+
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await processFile(file);
+    event.target.value = "";
+  };
+
+  // ── Drag-and-drop handlers ────────────────────────────────────────────────────
+  const handleDragOver = (event: React.DragEvent) => {
+    event.preventDefault();
+    if (!isUploading) setIsDragging(true);
+  };
+
+  const handleDragLeave = (event: React.DragEvent) => {
+    // Only clear when leaving the drop zone itself, not its children.
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+    setIsDragging(false);
+  };
+
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    setIsDragging(false);
+    if (isUploading) return;
+    const file = event.dataTransfer.files?.[0];
+    if (file) void processFile(file);
   };
 
   const handleConfirmDelete = async () => {
@@ -147,6 +181,12 @@ export default function DocumentSidebar({
       setDeletingId(null);
     }
   };
+
+  const showSearch = documents.length > SEARCH_THRESHOLD;
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleDocuments = normalizedQuery
+    ? documents.filter((d) => d.title.toLowerCase().includes(normalizedQuery))
+    : documents;
 
   return (
     <>
@@ -196,13 +236,46 @@ export default function DocumentSidebar({
       )}
 
       {/* ── Sidebar body ── */}
-      <div className="flex h-full flex-col">
-        <div className="p-4 border-b border-border">
-          <h1 className="text-lg font-semibold">EduPulse</h1>
-          <p className="text-sm text-muted-foreground">Study AI Agent</p>
+      <div
+        className="relative flex h-full flex-col bg-sidebar"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {/* Drag overlay */}
+        {isDragging && (
+          <div className="absolute inset-2 z-40 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-primary bg-primary/5 backdrop-blur-sm pointer-events-none">
+            <UploadCloud className="h-7 w-7 text-primary" />
+            <p className="text-sm font-medium text-primary">Drop PDF to upload</p>
+          </div>
+        )}
+
+        <div className="flex items-start justify-between gap-2 p-4 border-b border-border">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <FileText className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-base font-semibold leading-tight truncate">
+                EduPulse
+              </h1>
+              <p className="text-xs text-muted-foreground">Study AI Agent</p>
+            </div>
+          </div>
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onClose}
+              aria-label="Close sidebar"
+              className="shrink-0 md:hidden"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
         </div>
 
-        <div className="p-3 border-b border-border">
+        <div className="p-3 border-b border-border space-y-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -212,8 +285,7 @@ export default function DocumentSidebar({
           />
           <Button
             type="button"
-            variant="outline"
-            className="w-full justify-start gap-2"
+            className="w-full justify-center gap-2"
             disabled={isUploading}
             onClick={() => fileInputRef.current?.click()}
           >
@@ -224,67 +296,112 @@ export default function DocumentSidebar({
             )}
             {isUploading ? uploadProgress || "Uploading..." : "Upload Document"}
           </Button>
+          {!isUploading && (
+            <p className="text-center text-[11px] text-muted-foreground">
+              or drag &amp; drop a PDF here · max 10MB
+            </p>
+          )}
         </div>
+
+        {showSearch && (
+          <div className="px-3 pt-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.currentTarget.value)}
+                placeholder="Search documents..."
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+          </div>
+        )}
 
         {hasDocuments ? (
           <ScrollArea className="flex-1">
             <div className="p-2">
               <p className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Documents
+                {showSearch && (
+                  <span className="ml-1 normal-case tracking-normal">
+                    ({visibleDocuments.length})
+                  </span>
+                )}
               </p>
-              <div className="space-y-1">
-                {documents.map((document) => {
-                  const isActive = document.id === activeDocumentId;
-                  const isDeleting = deletingId === document.id;
 
-                  return (
-                    <div key={document.id} className="group relative">
-                      <button
-                        onClick={() => onSelectDocument?.(document.id)}
-                        disabled={isDeleting}
-                        className={
-                          isActive
-                            ? "w-full text-left px-3 py-2 pr-9 rounded-md text-sm bg-accent text-accent-foreground"
-                            : "w-full text-left px-3 py-2 pr-9 rounded-md text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-                        }
-                      >
-                        <p className="font-medium truncate">{document.title}</p>
-                        <p className="text-xs opacity-60 mt-0.5">
-                          {new Date(document.createdAt).toLocaleDateString()}
-                        </p>
-                      </button>
+              {visibleDocuments.length === 0 ? (
+                <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  No documents match &ldquo;{query}&rdquo;.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {visibleDocuments.map((document) => {
+                    const isActive = document.id === activeDocumentId;
+                    const isDeleting = deletingId === document.id;
 
-                      {/* Trash / spinner — appears on hover */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!isDeleting) setConfirmDoc(document);
-                        }}
-                        disabled={isDeleting}
-                        aria-label={`Delete ${document.title}`}
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md
-                          text-muted-foreground hover:text-destructive hover:bg-destructive/10
-                          opacity-0 group-hover:opacity-100 focus:opacity-100
-                          transition-all duration-150 disabled:cursor-not-allowed"
-                      >
-                        {isDeleting ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                    return (
+                      <div key={document.id} className="group relative">
+                        <button
+                          onClick={() => onSelectDocument?.(document.id)}
+                          disabled={isDeleting}
+                          className={
+                            "w-full text-left pl-3 pr-9 py-2 rounded-lg text-sm border transition-colors flex items-start gap-2.5 " +
+                            (isActive
+                              ? "bg-primary/10 border-primary/30 text-foreground"
+                              : "border-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground")
+                          }
+                        >
+                          <FileText
+                            className={
+                              "h-4 w-4 mt-0.5 shrink-0 " +
+                              (isActive
+                                ? "text-primary"
+                                : "text-muted-foreground/70")
+                            }
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-medium truncate">
+                              {document.title}
+                            </span>
+                            <span className="block text-xs opacity-60 mt-0.5">
+                              {new Date(document.createdAt).toLocaleDateString()}
+                            </span>
+                          </span>
+                        </button>
+
+                        {/* Trash / spinner — appears on hover */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!isDeleting) setConfirmDoc(document);
+                          }}
+                          disabled={isDeleting}
+                          aria-label={`Delete ${document.title}`}
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md
+                            text-muted-foreground hover:text-destructive hover:bg-destructive/10
+                            opacity-0 group-hover:opacity-100 focus:opacity-100
+                            transition-all duration-150 disabled:cursor-not-allowed"
+                        >
+                          {isDeleting ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </ScrollArea>
         ) : (
           <div className="flex-1 flex items-center justify-center px-6 text-center">
-            <div className="rounded-lg border border-dashed border-border p-4 space-y-2">
+            <div className="rounded-lg border border-dashed border-border p-6 space-y-2">
+              <UploadCloud className="mx-auto h-7 w-7 text-muted-foreground/60" />
               <p className="text-sm font-medium">No documents yet</p>
               <p className="text-xs text-muted-foreground">
-                Upload a PDF to get started.
+                Upload or drop a PDF to get started.
               </p>
             </div>
           </div>
